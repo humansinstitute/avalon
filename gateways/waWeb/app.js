@@ -110,33 +110,9 @@ client.on('message_create', async (message) => {
 
     console.log('Received message:', message.body);
     // Handle specific commands
-    if (message.body === '$ping') {
-        await message.reply('pong');
-    } else if (message.body.includes('$balance')) {
+    if (message.body.includes('$')) {
         // Implement balance command
         await message.reply(`Your balance is ${balanceAmount} sats.`);
-    } else if (message.body.includes('$nostr')) {
-        // Implement balance command
-        await message.reply(`Today on Nostr, from your friends Lyn is going off with a great rant, do you want to know more (1). Alex has a great artcile on why nostr is powerful (2). Farida is talking about the evils of the CFA (3)...`);
-    } else if (message.body.includes('$publish')) {
-        // Implement balance command
-        await message.reply(`I have published to nostr (npub238hkj...) Live from Lome! Getting ready for Kisaw round 2. Zap to show your support`);
-    } else if (message.body.includes('$pay')) {
-        // Implement pay command
-        await message.reply('This will send Alex (gladstein@nostrplebs.com) 5,000 sats.\n\nConfirm with pin...');
-        balanceAmount = balanceAmount - 5000;
-        // Add a 10-second delay here
-        await new Promise(resolve => setTimeout(resolve, 6000));
-        // Carry on with program
-        await message.reply(`5,000 sats sent to Alex (gladstein@nostrplebs.com). \n\nYour new balance is: ${balanceAmount} sats`);
-    } else if (message.body.includes('sausage')) {
-        // Implement pay command
-        await message.reply('This will send Alex (gladstein@nostrplebs.com) 5,000 sats.\n\nConfirm with pin...');
-        balanceAmount = balanceAmount - 5000;
-        // Add a 10-second delay here
-        await new Promise(resolve => setTimeout(resolve, 6000));
-        // Carry on with program
-        await message.reply(`5,000 sats sent to Alex (gladstein@nostrplebs.com). \n\nYour new balance is: ${balanceAmount} sats`);
     } else {
         // If no command is detected, call the research function
         try {
