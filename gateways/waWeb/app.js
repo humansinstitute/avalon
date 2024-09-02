@@ -110,28 +110,26 @@ client.on('message_create', async (message) => {
 
     console.log('Received message:', message.body);
     // Handle specific commands
-    if (message.body.includes('$')) {
-        // Implement balance command
-        await message.reply(`Your balance is ${balanceAmount} sats.`);
-    } else {
-        // If no command is detected, call the research function
-        try {
-            const billingDoc = await Budgets.findOne({ app: 'avalon' });
-            console.log(billingDoc);
-            if (!billingDoc || billingDoc.budget < 0.1) {
-                await message.reply("This app is out of budget, please contact Pete!");
-            } else {
-                await researchAnswer(message);
+    // if (message.body === '$ping') {
+    //     await message.reply('pong');
+    // } else { }
+    try {
+        const billingDoc = await Budgets.findOne({ app: 'avalon' });
+        console.log(billingDoc);
+        if (!billingDoc || billingDoc.budget < 0.1) {
+            await message.reply("This app is out of budget, please contact Pete!");
+        } else {
+            await researchAnswer(message);
 
-                // Deprecate the budget by 5 cents
-                billingDoc.budget -= 0.05;
-                await billingDoc.save();
-            }
-        } catch (error) {
-            console.error('Error checking budget or updating billing:', error);
-            await message.reply('Sorry, there was an error processing your request.');
+            // Deprecate the budget by 5 cents
+            billingDoc.budget -= 0.05;
+            await billingDoc.save();
         }
+    } catch (error) {
+        console.error('Error checking budget or updating billing:', error);
+        await message.reply('Sorry, there was an error processing your request.');
     }
+
 });
 
 // Add error event listener
