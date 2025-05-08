@@ -1,4 +1,5 @@
-require("dotenv").config({ path: `.env` });
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env' });
 
 async function callOSAPI(endpoint, payload) { //FILL IN VARIABLES
 
@@ -40,4 +41,4 @@ async function callOSAPI(endpoint, payload) { //FILL IN VARIABLES
     }
 
 }
-module.exports = callOSAPI;
+export default callOSAPI;

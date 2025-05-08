@@ -1,5 +1,6 @@
 {
   "name": "avalon",
+  "type": "module",
   "version": "1.0.0",
   "description": "protocol for embedding apps into chat products",
   "main": "app.js",
@@ -27,12 +28,18 @@
   },
   "homepage": "https://github.com/humansinstitute/avalon#readme",
   "dependencies": {
+    "@nostr-dev-kit/ndk": "^2.14.5",
     "axios": "^1.7.3",
     "body-parser": "^1.20.2",
     "dotenv": "^16.4.5",
+    "eventsource": "^3.0.6",
     "express": "^4.19.2",
     "mongoose": "^8.6.0",
+    "morgan": "^1.10.0",
+    "nostr-tools": "^2.12.0",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.25.0"
+    "uuid": "^11.1.0",
+    "whatsapp-web.js": "^1.27.0",
+    "winston": "^3.17.0"
   }
 }

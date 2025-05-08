@@ -1,13 +1,30 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const axios = require('axios'); // You'll need to install this: npm install axios
-const { v4: uuidv4 } = require('uuid');
-const mongoose = require('mongoose'); // Add this line
+/**
+ * gateways/waWeb/app.js
+ *
+ * Gateway connecting WhatsApp Web to the OSAPI backend.
+ * - Handles authentication via QR code and LocalAuth strategy.
+ * - Processes incoming messages by calling `callOSAPI`.
+ * - Logs interactions and tracks budget usage in MongoDB.
+ */
 
-// Assuming you have these functions defined elsewhere
-const callOSAPI = require('../../services/chat/callOSAPI');
+// External dependencies
+// Library for interacting with WhatsApp Web and managing sessions.
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
+// Displays QR code in the terminal for user authentication.
+import qrcode from 'qrcode-terminal';
+// HTTP client for API requests (used within callOSAPI).
+import axios from 'axios';
+// Generates UUIDs for unique run identifiers.
+import { v4 as uuidv4 } from 'uuid';
+// ODM for MongoDB database interactions.
+import mongoose from 'mongoose';
 
-// Create a new client instance
+// Local service module for calling the OSAPI backend.
+import callOSAPI from '../../services/chat/callOSAPI.js';
+
+// Initialize WhatsApp client with LocalAuth persistence.
+// Puppeteer args ensure compatibility in sandboxed environments.
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -15,132 +32,52 @@ const client = new Client({
     }
 });
 
-// When the client is ready, run this code (only once)
-client.once('ready', () => {
-    console.log('Client is ready!');
-    checkAndLogBudget(); // Call the function to check and log the budget
-});
-
-// When the client receives a QR code
+// Display QR code in terminal when WhatsApp Web requests authentication.
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
 });
 
-// MongoDB connection
-mongoose.connect(process.env.PRODMONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+// Once the client is ready, log confirmation and check current budget.
+client.once('ready', () => {
+    console.log('Client is ready!');
+    checkAndLogBudget();
+});
+
+// Handle authentication failures by logging the error.
+client.on('auth_failure', msg => {
+    console.error('Authentication failure:', msg);
+});
+
+// MongoDB connection setup.
+// Connects to the database using the URI from the environment variable.
+// Uses new URL parser and unified topology for compatibility.
+mongoose.connect(process.env.PRODMONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+})
     .then(() => console.log('MongoDB connected'))
     .catch(err => console.error('MongoDB connection error:', err));
 
-// Billing model
+// Define the billing schema and model to track application budget.
 const billingSchema = new mongoose.Schema({
     app: { type: String, required: true },
     budget: { type: Number, required: true }
 });
-
 const Budgets = mongoose.model('Budgets', billingSchema);
 
-// Logging model
+// Define the logging schema and model to store interaction logs.
 const loggingSchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now },
     input: Object,
     output: Object
 });
-
 const Logging = mongoose.model('Logging', loggingSchema);
 
-// Function to research and answer questions
-async function researchAnswer(message) {
-    try {
-        // Send an initial response
-        // await client.sendMessage(message.from, 'Ok - doing some research 🤔📖');
-
-        // Remove any potential command strings from the question
-        const question = message.body;
-        const pipeData = { question, action: "research" };
-        const payload = {
-            pipelineData: {
-                runID: uuidv4(),
-                payload: pipeData,
-            },
-            origin: {
-                originID: message._data.id._serialized,
-                conversationID: message._data.id._serialized,
-                channel: "whatsApp",
-                userID: message.from,
-                billingID: message.from, // Represents the billing identity - currently slack team will be abstracted
-            }
-        };
-
-        const response = await callOSAPI("execute", payload);
-
-        // Log the interaction
-        await Logging.create({
-            input: message,
-            output: response
-        });
-
-        await message.reply(response.message);
-
-        // Update the budget (assuming 1 cent per interaction)
-        await Budgets.findOneAndUpdate(
-            { app: 'avalon' },
-            { $inc: { budget: -0.05 } },
-            { new: true, upsert: true }
-        );
-
-        return true;
-    } catch (error) {
-        console.error('Error in researchAnswer:', error);
-        await client.sendMessage(message.from, 'Sorry, there was an error processing your request.');
-        return false;
-    }
-}
-
-// Listen for incoming messages
-client.on('message_create', async (message) => {
-    let balanceAmount = 100000;
-    // Check the current budget amount on initialization
-    let currentBudget;
-
-    // Check if the message is from the bot itself
-    if (message.fromMe) {
-        console.log('Ignoring message from self:\n', message.body);
-        return; // Exit the function early if the message is from the bot
-    }
-
-    console.log('Received message:', message.body);
-    // Handle specific commands
-    // if (message.body === '$ping') {
-    //     await message.reply('pong');
-    // } else { }
-    try {
-        const billingDoc = await Budgets.findOne({ app: 'avalon' });
-        console.log(billingDoc);
-        if (!billingDoc || billingDoc.budget < 0.1) {
-            await message.reply("This app is out of budget, please contact Pete!");
-        } else {
-            await researchAnswer(message);
-
-            // Deprecate the budget by 5 cents
-            billingDoc.budget -= 0.05;
-            await billingDoc.save();
-        }
-    } catch (error) {
-        console.error('Error checking budget or updating billing:', error);
-        await message.reply('Sorry, there was an error processing your request.');
-    }
-
-});
-
-// Add error event listener
-client.on('auth_failure', msg => {
-    console.error('Authentication failure:', msg);
-});
-
-// Start the client
-client.initialize();
-
-// Add this function after the Budgets model definition
+/**
+ * Fetches and logs the current budget for the 'avalon' application.
+ *
+ * @returns {Promise<void>}
+ */
 async function checkAndLogBudget() {
     try {
         const budgetDoc = await Budgets.findOne({ app: 'avalon' });
@@ -153,3 +90,114 @@ async function checkAndLogBudget() {
         console.error('Error fetching budget:', error);
     }
 }
+
+/**
+ * Processes an incoming WhatsApp message by calling the OSAPI service.
+ * Logs the request and response, replies to the user, and updates the budget.
+ *
+ * @param {import('whatsapp-web.js').Message} message - The incoming WhatsApp message object.
+ * @returns {Promise<boolean>} - True on success, false on error.
+ */
+async function researchAnswer(message) {
+    try {
+        // Extract the user's question from the message body.
+        const question = message.body;
+        // Prepare pipeline data with a unique run ID.
+        const pipeData = { question, action: "research" };
+        const payload = {
+            pipelineData: {
+                runID: uuidv4(),
+                payload: pipeData,
+            },
+            origin: {
+                // Metadata for tracing and billing.
+                originID: message._data.id._serialized,
+                conversationID: message._data.id._serialized,
+                channel: "whatsApp",
+                userID: message.from,
+                billingID: message.from,
+            }
+        };
+
+        // Call the external OSAPI service.
+        const response = await callOSAPI("execute", payload);
+
+        // Store the request and response in the logging collection.
+        await Logging.create({
+            input: message,
+            output: response
+        });
+
+        // Reply to the user with the service response.
+        const sentMessage = await message.reply(response.message);
+        //console.log(sentMessage);
+
+        // Deduct 5 cents from the budget for this interaction.
+        await Budgets.findOneAndUpdate(
+            { app: 'avalon' },
+            { $inc: { budget: -0.05 } },
+            { new: true, upsert: true }
+        );
+
+        return true;
+    } catch (error) {
+        console.error('Error in researchAnswer:', error);
+        // Inform the user of the error.
+        await client.sendMessage(message.from, 'Sorry, there was an error processing your request.');
+        return false;
+    }
+}
+
+/**
+ * Listener for incoming WhatsApp messages.
+ * - Ignores messages sent by this client.
+ * - Checks budget and processes messages if sufficient funds remain.
+ */
+client.on('message_create', async (message) => {
+    // Ignore messages sent by the bot itself.
+    if (message.fromMe) {
+        console.log('Ignoring message from self:', message.body);
+        return;
+    }
+
+    // Lookup gate details for this user
+    const gateId = message.from;
+    try {
+        const gateRes = await axios.get(`http://localhost:3000/id/gate/${gateId}`);
+        console.log('Gate User Details:', gateRes.data);
+    } catch (err) {
+        if (err.response && err.response.status === 404) {
+            console.log(`No identity found for ${gateId}, proceeding with default behavior`);
+            await client.sendMessage(message.from, "Hi I'm curently running an Avalon AI and I don't recognise your user ID!");
+            return;
+        } else {
+            console.error('Error fetching gate details:', err);
+            return;
+        }
+    }
+
+    console.log('Received message:', message.body);
+    //console.log(message);
+
+    try {
+        // Retrieve current budget for Avalon.
+        const billingDoc = await Budgets.findOne({ app: 'avalon' });
+        // If budget is insufficient, notify the user.
+        if (!billingDoc || billingDoc.budget < 0.10) {
+            await message.reply("This app is out of budget, please contact Pete!");
+        } else {
+            // Process the message through researchAnswer.
+            await researchAnswer(message);
+            // Additional budget decrement for researchAnswer.
+            billingDoc.budget -= 0.05;
+            await billingDoc.save();
+        }
+    } catch (error) {
+        console.error('Error checking budget or updating billing:', error);
+        // Inform the user of any processing errors.
+        await message.reply('Sorry, there was an error processing your request.');
+    }
+});
+
+// Start the WhatsApp client connection process.
+client.initialize();
