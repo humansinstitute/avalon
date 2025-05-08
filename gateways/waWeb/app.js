@@ -22,6 +22,9 @@ import mongoose from 'mongoose';
 
 // Local service module for calling the OSAPI backend.
 import callOSAPI from '../../services/chat/callOSAPI.js';
+import aiWrapper from '../../services/chat/aiWrapper.js';
+import gateKeeper from '../../services/agents/gateKeeper.js';
+import extractPost from '../../services/agents/extractPost.js';
 
 // Initialize WhatsApp client with LocalAuth persistence.
 // Puppeteer args ensure compatibility in sandboxed environments.
@@ -96,9 +99,10 @@ async function checkAndLogBudget() {
  * Logs the request and response, replies to the user, and updates the budget.
  *
  * @param {import('whatsapp-web.js').Message} message - The incoming WhatsApp message object.
+ * @param {string} npub - The user's npub identifier from gate details.
  * @returns {Promise<boolean>} - True on success, false on error.
  */
-async function researchAnswer(message) {
+async function researchAnswer(message, npub) {
     try {
         // Extract the user's question from the message body.
         const question = message.body;
@@ -114,8 +118,8 @@ async function researchAnswer(message) {
                 originID: message._data.id._serialized,
                 conversationID: message._data.id._serialized,
                 channel: "whatsApp",
-                userID: message.from,
-                billingID: message.from,
+                userID: npub,
+                billingID: npub,
             }
         };
 
@@ -162,9 +166,11 @@ client.on('message_create', async (message) => {
 
     // Lookup gate details for this user
     const gateId = message.from;
+    let npub = null; // Default to null if not found
     try {
         const gateRes = await axios.get(`http://localhost:3000/id/gate/${gateId}`);
         console.log('Gate User Details:', gateRes.data);
+        npub = gateRes.data.npub;
     } catch (err) {
         if (err.response && err.response.status === 404) {
             console.log(`No identity found for ${gateId}, proceeding with default behavior`);
@@ -179,6 +185,17 @@ client.on('message_create', async (message) => {
     console.log('Received message:', message.body);
     //console.log(message);
 
+    const callGateKeeper = await gateKeeper(message.body, "", npub);
+
+    // Set agent call origin details
+    callGateKeeper.origin.conversationID = message.id;
+
+    // Call Groq for intent classification. 
+    const intentObject = await aiWrapper(callGateKeeper);
+
+    console.log("\n\n***** THE INTENT OBJECT *****\n\n");
+    console.log(intentObject);
+
     try {
         // Retrieve current budget for Avalon.
         const billingDoc = await Budgets.findOne({ app: 'avalon' });
@@ -186,11 +203,77 @@ client.on('message_create', async (message) => {
         if (!billingDoc || billingDoc.budget < 0.10) {
             await message.reply("This app is out of budget, please contact Pete!");
         } else {
-            // Process the message through researchAnswer.
-            await researchAnswer(message);
-            // Additional budget decrement for researchAnswer.
-            billingDoc.budget -= 0.05;
-            await billingDoc.save();
+
+            // TODO HERE: TAKE SPECIFIC ACTIONS BASED OFF INTENT
+
+            switch (intentObject.message.intent) {
+                case 'research':
+                case 'event':
+                    // Process the message through researchAnswer with npub.
+                    // If npub is null, fall back to message.from
+                    await researchAnswer(message, npub || message.from);
+                    // Additional budget decrement for researchAnswer.
+                    billingDoc.budget -= 0.05;
+                    await billingDoc.save();
+                    break;
+                case 'conversation':
+                    await message.reply(intentObject.message.quickResponse);
+                    // No additional budget decrement or save needed here for this specific action path
+                    break;
+                case 'post':
+                    try {
+                        // Extract the message to post to nostr    
+                        const callExtractPost = await extractPost(message.body, "", npub);
+                        // Set agent call origin details
+                        callExtractPost.origin.conversationID = message.id;
+                        // Call Groq for intent classification. 
+                        const NostrPost = await aiWrapper(callExtractPost);
+                        const thePost = NostrPost.message.post;
+
+                        // Validate post content
+                        if (!thePost || typeof thePost !== 'string' || thePost.trim() === '') {
+                            console.log("No valid post content extracted or post is empty.");
+                            await client.sendMessage(message.from, "I couldn't figure out what you want to post, or the message was empty.");
+                            break;
+                        }
+
+                        // Submit post to Nostr
+                        const nostrPostUrl = 'http://localhost:3000/post/note';
+                        const postData = {
+                            npub: npub,
+                            content: thePost,
+                            powBits: 20,
+                            timeoutMs: 10000
+                        };
+
+                        console.log(`Attempting to post to Nostr for npub ${npub}:`, JSON.stringify(postData));
+                        const nostrApiResponse = await axios.post(nostrPostUrl, postData, {
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        console.log('Successfully posted to Nostr. API Response:', nostrApiResponse.data);
+                        await message.reply(`Posted to nostr ${thePost}`);
+
+                    } catch (err) {
+                        console.error('Error in "post" intent processing:', err.response ? err.response.data : err.message);
+                        await client.sendMessage(message.from, `Sorry, I wasn't able to send your note to Nostr. Please try again later.`);
+                    }
+                    break;
+
+                default:
+                    // Fallback for unhandled intents: respond with quickResponse
+                    console.log(`Unhandled intent: ${intentObject.message.intent}. Responding with quickResponse.`);
+                    if (intentObject.message.quickResponse) {
+                        await message.reply(intentObject.message.quickResponse);
+                    } else {
+                        // Fallback if quickResponse is also missing for some reason
+                        await message.reply("I'm not sure how to handle that request right now.");
+                        console.log("Warning: quickResponse was also undefined for unhandled intent.");
+                    }
+                    break;
+            }
         }
     } catch (error) {
         console.error('Error checking budget or updating billing:', error);
