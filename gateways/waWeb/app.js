@@ -229,6 +229,8 @@ client.on('message_create', async (message) => {
                         // Call Groq for intent classification. 
                         const NostrPost = await aiWrapper(callExtractPost);
                         const thePost = NostrPost.message.post;
+                        console.log("\n**** THE POST OBJECT ****\n\n");
+                        console.log(NostrPost);
 
                         // Validate post content
                         if (!thePost || typeof thePost !== 'string' || thePost.trim() === '') {
@@ -237,11 +239,23 @@ client.on('message_create', async (message) => {
                             break;
                         }
 
-                        // Submit post to Nostr
-                        const nostrPostUrl = 'http://localhost:3000/post/note';
+                        // Submit post to Nostr with direct post. 
+                        // const nostrPostUrl = 'http://localhost:3000/post/note';
+                        // const postData = {
+                        //     npub: npub,
+                        //     content: thePost,
+                        //     powBits: 20,
+                        //     timeoutMs: 10000
+                        // };
+
+                        // Submit post to Nostr with remote signing via Nostr MQ. 
+                        const nostrPostUrl = 'http://localhost:3000/post/note_remote';
                         const postData = {
-                            npub: npub,
-                            content: thePost,
+                            senderNpub: npub,
+                            callNpub: "npub17nqywpr8hvssklds0hd7uml8ydkw5vy2fj4dt6x93snh5tt9wl0sy56jrh",
+                            responseNpub: npub,
+                            signerNpub: npub,
+                            noteContent: thePost,
                             powBits: 20,
                             timeoutMs: 10000
                         };
